@@ -1,10 +1,15 @@
+# import the necessary packages
+from scipy.spatial import distance as dist
+from collections import OrderedDict
 import cv2
 import numpy as np
 import math
 import time
 
 
-THRESHOLD = 252
+THRESHOLD = 200
+
+MAX_DIST = 50
 
 global points
 points = []
@@ -257,32 +262,33 @@ def show_with_contours(path, show=True, log=False, blacked=False, vectors=False,
     cv2.destroyAllWindows()
 
 
-# import the necessary packages
-from scipy.spatial import distance as dist
-from collections import OrderedDict
-import numpy as np
-
-
 class CentroidTracker():
     def __init__(self):
         # initialize the next unique object ID along with two ordered
         # dictionaries used to keep track of mapping a given object
         # ID to its centroid and number of consecutive frames it has
         # been marked as "disappeared", respectively
-        self.nextObjectID = 0
+        self.objectIDfree = [0]
+        self.max_objectID = 0
         self.objects = OrderedDict()
 
 
     def register(self, centroid):
         # when registering an object we use the next available object
         # ID to store the centroid
-        self.objects[self.nextObjectID] = centroid
-        self.nextObjectID += 1
+        if len(self.objectIDfree) == 0:
+            self.max_objectID += 1
+            self.objects[self.max_objectID] = centroid
+        else:
+            self.objects[self.objectIDfree[-1]] = centroid
+            self.objectIDfree.pop()
+
 
     def deregister(self, objectID):
         # to deregister an object ID we delete the object ID from
         # both of our respective dictionaries
         del self.objects[objectID]
+        self.objectIDfree.append(objectID)
 
 
     def update(self, inputCentroids):
@@ -291,6 +297,10 @@ class CentroidTracker():
         if len(inputCentroids) == 0:
             # return early as there are no centroids or tracking info
             # to update
+            objectIDs = list(self.objects.keys())
+            for objectID in objectIDs:
+                self.deregister(objectID)
+
             return self.objects
 
         # initialize an array of input centroids for the current frame
@@ -303,7 +313,6 @@ class CentroidTracker():
         # try to match the input centroids to existing object
         # centroids
         else:
-            # grab the set of object IDs and corresponding centroids
             objectIDs = list(self.objects.keys())
             objectCentroids = list(self.objects.values())
             # compute the distance between each pair of object
@@ -321,7 +330,6 @@ class CentroidTracker():
             # finding the smallest value in each column and then
             # sorting using the previously computed row index list
             cols = D.argmin(axis=1)[rows]
-
             # in order to determine if we need to update, register,
             # or deregister an object we need to keep track of which
             # of the rows and column indexes we have already examined
@@ -345,30 +353,44 @@ class CentroidTracker():
                 usedRows.add(row)
                 usedCols.add(col)
 
-                # compute both the row and column index we have NOT yet
-                # examined
-                unusedRows = set(range(0, D.shape[0])).difference(usedRows)
-                unusedCols = set(range(0, D.shape[1])).difference(usedCols)
+            # compute both the row and column index we have NOT yet
+            # examined
+            unusedRows = set(range(0, D.shape[0])).difference(usedRows)
+            unusedCols = set(range(0, D.shape[1])).difference(usedCols)
 
-                # in the event that the number of object centroids is
-                # equal or greater than the number of input centroids
-                # we need to check and see if some of these objects have
-                # potentially disappeared
-                if D.shape[0] >= D.shape[1]:
-                    # loop over the unused row indexes
-                    for row in unusedRows:
-                        # grab the object ID for the corresponding row
-                        # index and increment the disappeared counter
-                        objectID = objectIDs[row]
+            # in the event that the number of object centroids is
+            # equal or greater than the number of input centroids
+            # we need to check and see if some of these objects have
+            # potentially disappeared
+            if D.shape[0] >= D.shape[1]:
+                # loop over the unused row indexes
+                for row in unusedRows:
+                    # grab the object ID for the corresponding row
+                    # index and increment the disappeared counter
+                    objectID = objectIDs[row]
+                    self.deregister(objectID)
 
-                        for col in unusedCols:
-                            self.register(inputCentroids[col])
+            # otherwise, if the number of input centroids is greater
+            # than the number of existing object centroids we need to
+            # register each new input centroid as a trackable object
+            else:
+                for col in unusedCols:
+                    self.register(inputCentroids[col])
+            # return the set of trackable objects
 
-        # return the set of trackable objects
         return self.objects
 
 
-def show_with_contours_and_tracking(path, tracker, show=True, log=False, blacked=False, vectors=False, track = True,  n_vectors=6, sleep = 0, timing = True):
+def show_with_contours_and_tracking(path, tracker,
+                                    show=True,
+                                    track=True,
+                                    log=False,
+                                    blacked=False,
+                                    vectors=False,
+                                    n_vectors=6,
+                                    sleep = 0,
+                                    timing = False,
+                                    track_log = True):
 
     cap = cv2.VideoCapture(path)
     ret = True
@@ -421,7 +443,7 @@ def show_with_contours_and_tracking(path, tracker, show=True, log=False, blacked
 
                 vector_ends = get_vectors_2(contour, n_vectors, cX, cY)
 
-                if time:
+                if timing:
 
                     print("time = ", time.perf_counter() - start_time)
 
@@ -430,11 +452,6 @@ def show_with_contours_and_tracking(path, tracker, show=True, log=False, blacked
                     print("vector of points = ", vector_ends)
 
                 if vectors:
-
-                    """
-                    for i in range(0, len(vector_ends)):
-                        print(i, " : ", vector_ends[i])
-                    """
 
                     for p in vector_ends:
 
@@ -460,6 +477,11 @@ def show_with_contours_and_tracking(path, tracker, show=True, log=False, blacked
                 cv2.putText(frame, text, (centroid[0] - 10, centroid[1] - 10),
                             cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 3)
                 cv2.circle(frame, (centroid[0], centroid[1]), 5, (0, 255, 0), -1)
+
+            if track_log:
+
+                print("Number of trackable objects:", len(objects.items()))
+
 
 
         if show:
@@ -489,4 +511,4 @@ path = r'C:\Users\user\Downloads\Telegram Desktop\TwoObjectsTest_.mp4'
 tracker = CentroidTracker()
 # choose_reference_points_in_first_frame(path)
 # show_with_contours(path, vectors=True, log=False, n_vectors=24, sleep=1, show=True)
-# show_with_contours_and_tracking(path, tracker, n_vectors=24, sleep=0, track= False, show=True)
+show_with_contours_and_tracking(path, tracker, n_vectors=24, sleep=0, vectors=True, track=True, show=True, track_log=True)
