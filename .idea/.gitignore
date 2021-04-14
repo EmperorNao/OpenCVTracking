@@ -1,3 +1,5 @@
 # Default ignored files
 *.xml
 *.mp4
+*.iml
+*.pyc
