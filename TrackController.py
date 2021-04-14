@@ -134,7 +134,11 @@ def show_with_contours(path, show=True, log=False, blacked=False, vectors=False,
 '''
 
 
-# TODO 1) remake function and make her ables to stop video and choose contours in time
+
+# TODO
+#  1) remake function and make her ables to stop video and choose contours in time
+#  2) remake callback without global variable
+
 def track(path,
                                     show=True,
                                     track=True,
